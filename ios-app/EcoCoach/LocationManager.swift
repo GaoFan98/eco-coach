@@ -2,40 +2,24 @@ import Foundation
 import CoreLocation
 import MapKit
 import SwiftUI
+import Combine
 
-class LocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
-    private let locationManager = CLLocationManager()
+// MARK: - Location Manager
+class EcoLocationManager: NSObject, ObservableObject {
+    private let clLocationManager = CLLocationManager()
     
     @Published var location: CLLocationCoordinate2D?
-    @Published var authorizationStatus: CLAuthorizationStatus
+    var locationUpdateHandler: ((CLLocationCoordinate2D) -> Void)?
     
     override init() {
-        authorizationStatus = locationManager.authorizationStatus
-        
         super.init()
-        
-        locationManager.delegate = self
-        locationManager.desiredAccuracy = kCLLocationAccuracyBest
-        locationManager.distanceFilter = 10 // Update when user moves 10 meters
-        locationManager.requestWhenInUseAuthorization()
-        locationManager.startUpdatingLocation()
-    }
-    
-    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        guard let location = locations.last else { return }
-        self.location = location.coordinate
-    }
-    
-    func locationManager(_ manager: CLLocationManager, didChangeAuthorization status: CLAuthorizationStatus) {
-        authorizationStatus = status
+        self.clLocationManager.delegate = self
+        self.clLocationManager.desiredAccuracy = kCLLocationAccuracyBest
+        self.clLocationManager.requestWhenInUseAuthorization()
     }
     
     func startUpdatingLocation() {
-        locationManager.startUpdatingLocation()
-    }
-    
-    func stopUpdatingLocation() {
-        locationManager.stopUpdatingLocation()
+        self.clLocationManager.startUpdatingLocation()
     }
     
     // Get Tokyo coordinates if user is not in Tokyo
@@ -58,5 +42,22 @@ class LocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         }
         
         return tokyoCenter
+    }
+}
+
+extension EcoLocationManager: CLLocationManagerDelegate {
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard let location = locations.last else { return }
+        
+        self.location = location.coordinate
+        
+        // Call the callback if it exists
+        if let callback = locationUpdateHandler {
+            callback(location.coordinate)
+        }
+    }
+    
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        print("Location manager failed with error: \(error.localizedDescription)")
     }
 } 

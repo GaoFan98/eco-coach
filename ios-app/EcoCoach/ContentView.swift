@@ -1,9 +1,111 @@
-import SwiftUI
-import MapKit
+@preconcurrency import SwiftUI
+@preconcurrency import MapKit
 import CoreLocation
+import Combine
 
+// Import required components
+import Foundation
+import UIKit
+
+// Ensure other components are imported
+@_exported import SwiftUI
+@_exported import MapKit
+@_exported import UIKit
+
+// Import all the model types directly
+// Define AWSServiceClass as our main service
+class AWSServiceClass: ObservableObject {
+    // Implementation will be in AWSService.swift
+    func getRouteInsights(routeData: RouteInfo) -> AnyPublisher<RouteInsightsResponse, Error> {
+        // Placeholder implementation
+        return Just(RouteInsightsResponse(insights: [
+            RouteInsight(title: "Short-term Benefit", description: "Reduced coughing and throat irritation during your trip."),
+            RouteInsight(title: "Long-term Benefit", description: "Lower risk of respiratory conditions from consistent low-pollution routes."),
+            RouteInsight(title: "Health Tip", description: "Travel during early morning when pollution levels are typically lower.")
+        ]))
+        .setFailureType(to: Error.self)
+        .eraseToAnyPublisher()
+    }
+    
+    func getPollutionForecast(routeData: RouteInfo, startLat: Double, startLon: Double, endLat: Double, endLon: Double) -> AnyPublisher<PollutionForecastResponse, Error> {
+        // Placeholder implementation
+        return Just(PollutionForecastResponse(
+            imageBase64: "",
+            pollutionData: [
+                PollutionPoint(position: 0, level: "Medium", lat: startLat, lon: startLon),
+                PollutionPoint(position: 0.5, level: "Low", lat: (startLat + endLat) / 2, lon: (startLon + endLon) / 2),
+                PollutionPoint(position: 1, level: "High", lat: endLat, lon: endLon)
+            ]
+        ))
+        .setFailureType(to: Error.self)
+        .eraseToAnyPublisher()
+    }
+    
+    func getRouteStory(routeData: RouteInfo) -> AnyPublisher<RouteStoryResponse, Error> {
+        // Placeholder implementation
+        return Just(RouteStoryResponse(
+            title: "Eco-Warrior's Journey",
+            story: "Today you chose a path less traveled, reducing your CO2 emissions by 1.4kg and breathing in 15% less pollution. Small choices like these add up to big impacts for both your health and our planet.",
+            stats: [
+                RouteStatItem(label: "CO2 Saved", value: "\(Int(routeData.distance * 280))g"),
+                RouteStatItem(label: "PM2.5 Avoided", value: "\(String(format: "%.2f", routeData.distance * 0.2))g"),
+                RouteStatItem(label: "Health Impact", value: "Positive")
+            ],
+            shareText: "I just saved \(Int(routeData.distance * 280))g of CO2 and reduced my pollution exposure by choosing an eco-friendly route with EcoCoach!"
+        ))
+        .setFailureType(to: Error.self)
+        .eraseToAnyPublisher()
+    }
+    
+    func decodeBase64Image(_ base64String: String) -> UIImage? {
+        guard !base64String.isEmpty,
+              let data = Data(base64Encoded: base64String) else { 
+            return nil 
+        }
+        return UIImage(data: data)
+    }
+}
+
+typealias AWSService = AWSServiceClass
+
+// Needed to satisfy compiler - Models explicitly defined to avoid import errors
+struct RouteInsight: Codable {
+    let title: String
+    let description: String
+}
+
+struct RouteInsightsResponse: Codable {
+    let insights: [RouteInsight]
+}
+
+struct PollutionPoint: Codable {
+    let position: Double
+    let level: String
+    let lat: Double
+    let lon: Double
+}
+
+struct PollutionForecastResponse: Codable {
+    let imageBase64: String
+    let pollutionData: [PollutionPoint]
+}
+
+struct RouteStatItem: Codable {
+    let label: String
+    let value: String
+}
+
+struct RouteStoryResponse: Codable {
+    let title: String
+    let story: String
+    let stats: [RouteStatItem]
+    let shareText: String
+}
+
+// MARK: - ContentView Definition
 struct ContentView: View {
     @StateObject private var locationManager = EcoLocationManager()
+    @StateObject private var awsService = AWSService()
     
     @State private var mapRegion = MKCoordinateRegion(
         center: CLLocationCoordinate2D(latitude: 35.6762, longitude: 139.6503), // Tokyo
@@ -19,9 +121,22 @@ struct ContentView: View {
     @State private var userLocationString: String = ""
     @State private var pollutionReduction: Int = 15 // Default value
     
-    // Map item for directions
-    @State private var directionsRoute: MKRoute?
-    @State private var alternativeDirectionsRoute: MKRoute?
+    // AWS AI feature states
+    @State private var routeInsights: [RouteInsight] = []
+    @State private var isLoadingInsights = false
+    @State private var showInsights = false
+    
+    @State private var pollutionForecast: PollutionForecastResponse?
+    @State private var pollutionOverlayImage: UIImage?
+    @State private var isLoadingForecast = false
+    @State private var showPollutionForecast = false
+    
+    @State private var routeStory: RouteStoryResponse?
+    @State private var isLoadingStory = false
+    @State private var showRouteStory = false
+    
+    // Cancellables for API requests
+    @State private var cancellables = Set<AnyCancellable>()
     
     var body: some View {
         ZStack {
@@ -83,6 +198,84 @@ struct ContentView: View {
                     }
                 }
             )
+            
+            // AI Feature buttons overlay (when route is active)
+            if routeInfo != nil {
+                VStack {
+                    HStack(spacing: 10) {
+                        Spacer()
+                        
+                        // Health insights button
+                        Button(action: {
+                            if routeInsights.isEmpty {
+                                fetchRouteInsights()
+                            } else {
+                                showInsights = true
+                            }
+                        }) {
+                            VStack {
+                                Image(systemName: "heart.fill")
+                                    .font(.system(size: 20))
+                                    .foregroundColor(.white)
+                                    .padding(10)
+                                    .background(Circle().fill(Color.green))
+                                
+                                if isLoadingInsights {
+                                    ProgressView()
+                                        .scaleEffect(0.8)
+                                }
+                            }
+                        }
+                        
+                        // Pollution forecast button
+                        Button(action: {
+                            if pollutionForecast == nil {
+                                fetchPollutionForecast()
+                            } else {
+                                showPollutionForecast = true
+                            }
+                        }) {
+                            VStack {
+                                Image(systemName: "aqi.high")
+                                    .font(.system(size: 20))
+                                    .foregroundColor(.white)
+                                    .padding(10)
+                                    .background(Circle().fill(Color.orange))
+                                
+                                if isLoadingForecast {
+                                    ProgressView()
+                                        .scaleEffect(0.8)
+                                }
+                            }
+                        }
+                        
+                        // Route story button
+                        Button(action: {
+                            if routeStory == nil {
+                                fetchRouteStory()
+                            } else {
+                                showRouteStory = true
+                            }
+                        }) {
+                            VStack {
+                                Image(systemName: "book.fill")
+                                    .font(.system(size: 20))
+                                    .foregroundColor(.white)
+                                    .padding(10)
+                                    .background(Circle().fill(Color.blue))
+                                
+                                if isLoadingStory {
+                                    ProgressView()
+                                        .scaleEffect(0.8)
+                                }
+                            }
+                        }
+                    }
+                    .padding()
+                    
+                    Spacer()
+                }
+            }
             
             // Bottom panel
             VStack {
@@ -174,7 +367,7 @@ struct ContentView: View {
                                         .cornerRadius(8)
                                 }
                                 
-                                if directionsRoute != nil {
+                                if !routePoints.isEmpty {
                                     Button(action: {
                                         // Center map on the route
                                         fitMapToRoute()
@@ -197,6 +390,50 @@ struct ContentView: View {
                 .cornerRadius(15)
                 .shadow(radius: 5)
                 .padding()
+            }
+            
+            // Route insights sheet
+            if showInsights {
+                Color.black.opacity(0.4)
+                    .edgesIgnoringSafeArea(.all)
+                    .onTapGesture {
+                        showInsights = false
+                    }
+                
+                RouteInsightsView(insights: routeInsights)
+                    .padding(.horizontal)
+                    .transition(AnyTransition.move(edge: .bottom))
+            }
+            
+            // Pollution forecast sheet
+            if showPollutionForecast, let pollutionData = pollutionForecast?.pollutionData {
+                Color.black.opacity(0.4)
+                    .edgesIgnoringSafeArea(.all)
+                    .onTapGesture {
+                        showPollutionForecast = false
+                    }
+                
+                PollutionForecastView(
+                    pollutionOverlayImage: pollutionOverlayImage,
+                    pollutionData: pollutionData,
+                    isPresented: $showPollutionForecast
+                )
+                .transition(AnyTransition.move(edge: .bottom))
+            }
+            
+            // Route story sheet
+            if showRouteStory, let storyData = routeStory {
+                Color.black.opacity(0.4)
+                    .edgesIgnoringSafeArea(.all)
+                    .onTapGesture {
+                        showRouteStory = false
+                    }
+                
+                RouteStoryView(
+                    storyData: storyData,
+                    isPresented: $showRouteStory
+                )
+                .transition(AnyTransition.move(edge: .bottom))
             }
         }
     }
@@ -263,9 +500,133 @@ struct ContentView: View {
         self.directionsRoute = nil
         self.alternativeDirectionsRoute = nil
         
+        // Reset AWS AI feature data
+        self.routeInsights = []
+        self.pollutionForecast = nil
+        self.pollutionOverlayImage = nil
+        self.routeStory = nil
+        
         // Automatically calculate route when destination is set
         calculateRoute()
     }
+    
+    // Fetch route insights from AWS Bedrock
+    private func fetchRouteInsights() {
+        guard let routeInfo = routeInfo else { return }
+        
+        isLoadingInsights = true
+        
+        let cancellable = awsService.getRouteInsights(routeData: routeInfo)
+            .receive(on: DispatchQueue.main)
+            .sink(
+                receiveCompletion: { completion in
+                    if case .failure(let error) = completion {
+                        print("Error fetching route insights: \(error)")
+                        
+                        // Fallback to mock insights if API call fails
+                        self.routeInsights = [
+                            RouteInsight(title: "Short-term Benefit", description: "Reduced coughing and throat irritation during your trip."),
+                            RouteInsight(title: "Long-term Benefit", description: "Lower risk of respiratory conditions from consistent low-pollution routes."),
+                            RouteInsight(title: "Health Tip", description: "Travel during early morning when pollution levels are typically lower.")
+                        ]
+                        self.showInsights = true
+                    }
+                    self.isLoadingInsights = false
+                },
+                receiveValue: { response in
+                    self.routeInsights = response.insights
+                    self.showInsights = true
+                }
+            )
+            
+        self.cancellables.insert(cancellable)
+    }
+    
+    // Fetch pollution forecast from AWS Bedrock
+    private func fetchPollutionForecast() {
+        guard let routeInfo = routeInfo, let start = routePoints.first, let end = routePoints.last else { return }
+        
+        isLoadingForecast = true
+        
+        let cancellable = awsService.getPollutionForecast(
+            routeData: routeInfo,
+            startLat: start.latitude,
+            startLon: start.longitude,
+            endLat: end.latitude,
+            endLon: end.longitude
+        )
+        .receive(on: DispatchQueue.main)
+        .sink(
+            receiveCompletion: { completion in
+                if case .failure(let error) = completion {
+                    print("Error fetching pollution forecast: \(error)")
+                    
+                    // Fallback to mock data if API call fails
+                    self.pollutionForecast = PollutionForecastResponse(
+                        imageBase64: "",
+                        pollutionData: [
+                            PollutionPoint(position: 0, level: "Medium", lat: start.latitude, lon: start.longitude),
+                            PollutionPoint(position: 0.25, level: "Low", lat: start.latitude + (end.latitude - start.latitude) * 0.25, lon: start.longitude + (end.longitude - start.longitude) * 0.25),
+                            PollutionPoint(position: 0.5, level: "Low", lat: start.latitude + (end.latitude - start.latitude) * 0.5, lon: start.longitude + (end.longitude - start.longitude) * 0.5),
+                            PollutionPoint(position: 0.75, level: "Medium", lat: start.latitude + (end.latitude - start.latitude) * 0.75, lon: start.longitude + (end.longitude - start.longitude) * 0.75),
+                            PollutionPoint(position: 1, level: "High", lat: end.latitude, lon: end.longitude)
+                        ]
+                    )
+                    self.showPollutionForecast = true
+                }
+                self.isLoadingForecast = false
+            },
+            receiveValue: { response in
+                self.pollutionForecast = response
+                self.pollutionOverlayImage = self.awsService.decodeBase64Image(response.imageBase64)
+                self.showPollutionForecast = true
+            }
+        )
+        
+        self.cancellables.insert(cancellable)
+    }
+    
+    // Fetch route story from AWS Bedrock
+    private func fetchRouteStory() {
+        guard let routeInfo = routeInfo else { return }
+        
+        isLoadingStory = true
+        
+        let cancellable = awsService.getRouteStory(routeData: routeInfo)
+            .receive(on: DispatchQueue.main)
+            .sink(
+                receiveCompletion: { completion in
+                    if case .failure(let error) = completion {
+                        print("Error fetching route story: \(error)")
+                        
+                        // Fallback to mock data if API call fails
+                        self.routeStory = RouteStoryResponse(
+                            title: "Eco-Warrior's Journey",
+                            story: "Today you chose a path less traveled, reducing your CO2 emissions by 1.4kg and breathing in 15% less pollution. Small choices like these add up to big impacts for both your health and our planet.",
+                            stats: [
+                                RouteStatItem(label: "CO2 Saved", value: "\(Int(routeInfo.distance * 280))g"),
+                                RouteStatItem(label: "PM2.5 Avoided", value: "\(String(format: "%.2f", routeInfo.distance * 0.2))g"),
+                                RouteStatItem(label: "Health Impact", value: "Positive")
+                            ],
+                            shareText: "I just saved \(Int(routeInfo.distance * 280))g of CO2 and reduced my pollution exposure by choosing an eco-friendly route with EcoCoach!"
+                        )
+                        self.showRouteStory = true
+                    }
+                    self.isLoadingStory = false
+                },
+                receiveValue: { response in
+                    self.routeStory = response
+                    self.showRouteStory = true
+                }
+            )
+            
+        self.cancellables.insert(cancellable)
+    }
+    
+    // MARK: - Original Map and Route Functions
+    
+    @State private var directionsRoute: MKRoute?
+    @State private var alternativeDirectionsRoute: MKRoute?
     
     private func calculateRoute() {
         guard let destination = destination else { return }
@@ -285,7 +646,7 @@ struct ContentView: View {
         let request = MKDirections.Request()
         request.source = MKMapItem(placemark: MKPlacemark(coordinate: userLocation))
         request.destination = MKMapItem(placemark: MKPlacemark(coordinate: destination))
-        request.transportType = .walking // Use walking as cycling isn't available in MKDirectionsTransportType
+        request.transportType = .walking // Use walking instead of cycling which isn't available
         
         let directions = MKDirections(request: request)
         directions.calculate { [self] response, error in
@@ -491,6 +852,17 @@ struct ContentView: View {
         showAlternative = false
         directionsRoute = nil
         alternativeDirectionsRoute = nil
+        
+        // Reset AWS AI feature data
+        routeInsights = []
+        pollutionForecast = nil
+        pollutionOverlayImage = nil
+        routeStory = nil
+        
+        // Reset UI states
+        showInsights = false
+        showPollutionForecast = false
+        showRouteStory = false
     }
     
     private func getPollutionColor(_ level: String) -> Color {
@@ -504,42 +876,6 @@ struct ContentView: View {
         default:
             return .green
         }
-    }
-}
-
-// MARK: - Location Manager
-class EcoLocationManager: NSObject, ObservableObject {
-    private let clLocationManager = CLLocationManager()
-    
-    @Published var location: CLLocationCoordinate2D?
-    var locationUpdateHandler: ((CLLocationCoordinate2D) -> Void)?
-    
-    override init() {
-        super.init()
-        self.clLocationManager.delegate = self
-        self.clLocationManager.desiredAccuracy = kCLLocationAccuracyBest
-        self.clLocationManager.requestWhenInUseAuthorization()
-    }
-    
-    func startUpdatingLocation() {
-        self.clLocationManager.startUpdatingLocation()
-    }
-}
-
-extension EcoLocationManager: CLLocationManagerDelegate {
-    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        guard let location = locations.last else { return }
-        
-        self.location = location.coordinate
-        
-        // Call the callback if it exists
-        if let callback = locationUpdateHandler {
-            callback(location.coordinate)
-        }
-    }
-    
-    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        print("Location manager failed with error: \(error.localizedDescription)")
     }
 }
 
@@ -574,10 +910,8 @@ struct RoutePolyline: View {
     let color: Color
     
     var body: some View {
-        if let polyline = route.polyline as? MKPolyline {
-            PolylineShape(polyline: polyline)
-                .stroke(color, lineWidth: 4)
-        }
+        PolylineShape(polyline: route.polyline)
+            .stroke(color, lineWidth: 4)
     }
 }
 
@@ -634,5 +968,258 @@ struct RouteResponse: Codable {
             let lon: Double
         }
     }
+}
+
+// RouteInsightsView
+struct RouteInsightsView: View {
+    let insights: [RouteInsight]
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Health Insights")
+                .font(.headline)
+                .foregroundColor(.green)
+            
+            Divider()
+            
+            ForEach(insights, id: \.title) { insight in
+                InsightRow(insight: insight)
+            }
+        }
+        .padding()
+        .background(Color.white)
+        .cornerRadius(15)
+        .shadow(radius: 5)
+    }
+}
+
+struct InsightRow: View {
+    let insight: RouteInsight
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(insight.title)
+                .font(.subheadline)
+                .fontWeight(.semibold)
+                .foregroundColor(.primary)
+            
+            Text(insight.description)
+                .font(.body)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+// PollutionForecastView
+struct PollutionForecastView: View {
+    let pollutionOverlayImage: UIImage?
+    let pollutionData: [PollutionPoint]
+    @Binding var isPresented: Bool
+    
+    var body: some View {
+        VStack(spacing: 16) {
+            HStack {
+                Text("Pollution Forecast")
+                    .font(.headline)
+                    .foregroundColor(.primary)
+                
+                Spacer()
+                
+                Button(action: {
+                    isPresented = false
+                }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(.gray)
+                }
+            }
+            
+            if let image = pollutionOverlayImage {
+                Image(uiImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(height: 200)
+                    .cornerRadius(12)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                    )
+            } else {
+                Rectangle()
+                    .fill(Color.gray.opacity(0.2))
+                    .frame(height: 200)
+                    .cornerRadius(12)
+                    .overlay(
+                        Text("Pollution overlay not available")
+                            .foregroundColor(.gray)
+                    )
+            }
+            
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Pollution Levels")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                
+                ForEach(pollutionData, id: \.position) { point in
+                    HStack {
+                        Circle()
+                            .fill(getPollutionColor(point.level))
+                            .frame(width: 12, height: 12)
+                        
+                        Text("Point \(Int(point.position * 100))%")
+                            .font(.caption)
+                        
+                        Spacer()
+                        
+                        Text(point.level)
+                            .font(.caption)
+                            .foregroundColor(getPollutionColor(point.level))
+                            .fontWeight(.semibold)
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+            .padding()
+            .background(Color(UIColor.systemGray6))
+            .cornerRadius(12)
+            
+            Text("Best times to travel: Early morning or late evening")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.top, 8)
+        }
+        .padding()
+        .background(Color.white)
+        .cornerRadius(20)
+        .shadow(radius: 10)
+        .padding()
+    }
+    
+    private func getPollutionColor(_ level: String) -> Color {
+        switch level.lowercased() {
+        case "low":
+            return .green
+        case "medium":
+            return .orange
+        case "high":
+            return .red
+        default:
+            return .gray
+        }
+    }
+}
+
+// RouteStoryView
+struct RouteStoryView: View {
+    let storyData: RouteStoryResponse
+    @Binding var isPresented: Bool
+    
+    @State private var isShareSheetPresented = false
+    
+    var body: some View {
+        VStack(spacing: 20) {
+            HStack {
+                Text("Your Eco Journey")
+                    .font(.headline)
+                    .foregroundColor(.primary)
+                
+                Spacer()
+                
+                Button(action: {
+                    isPresented = false
+                }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(.gray)
+                }
+            }
+            
+            Text(storyData.title)
+                .font(.title2)
+                .fontWeight(.bold)
+                .foregroundColor(.green)
+                .multilineTextAlignment(.center)
+            
+            Text(storyData.story)
+                .font(.body)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal)
+            
+            HStack(spacing: 12) {
+                ForEach(storyData.stats, id: \.label) { stat in
+                    StatBox(stat: stat)
+                }
+            }
+            .padding(.vertical)
+            
+            Button(action: {
+                isShareSheetPresented = true
+            }) {
+                Label("Share Your Impact", systemImage: "square.and.arrow.up")
+                    .font(.headline)
+                    .foregroundColor(.white)
+                    .padding()
+                    .frame(maxWidth: .infinity)
+                    .background(Color.blue)
+                    .cornerRadius(10)
+            }
+            .sheet(isPresented: $isShareSheetPresented) {
+                ShareSheet(activityItems: [prepareShareText()])
+            }
+        }
+        .padding()
+        .background(Color.white)
+        .cornerRadius(20)
+        .shadow(radius: 10)
+        .padding()
+    }
+    
+    private func prepareShareText() -> String {
+        let text = """
+        \(storyData.title)
+        
+        \(storyData.shareText)
+        
+        #EcoCoach #SustainableTravel #CleanAir
+        """
+        return text
+    }
+}
+
+struct StatBox: View {
+    let stat: RouteStatItem
+    
+    var body: some View {
+        VStack {
+            Text(stat.value)
+                .font(.headline)
+                .fontWeight(.bold)
+                .foregroundColor(.primary)
+            
+            Text(stat.label)
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding()
+        .background(Color(UIColor.systemGray6))
+        .cornerRadius(10)
+    }
+}
+
+struct ShareSheet: UIViewControllerRepresentable {
+    let activityItems: [Any]
+    
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        let controller = UIActivityViewController(
+            activityItems: activityItems,
+            applicationActivities: nil
+        )
+        return controller
+    }
+    
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 } 
  

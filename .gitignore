@@ -105,4 +105,8 @@ Config.xcconfig
 .idea/
 .vscode/
 *.swp
-*.swo 
+*.swo
+
+# AWS credentials
+ios-app/EcoCoach/Config.swift
+.env.bedrock 

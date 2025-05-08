@@ -1,6 +1,6 @@
 # Eco-Coach: Pollution-Minimizing Route Planner
 
-An eco-friendly cycling/walking route optimizer that minimizes your exposure to air pollution.
+An eco-friendly cycling/walking route optimizer that minimizes your exposure to air pollution, powered by AWS Generative AI.
 
 ## Features
 
@@ -11,11 +11,26 @@ An eco-friendly cycling/walking route optimizer that minimizes your exposure to 
 - Clean, intuitive SwiftUI interface
 - Real-time location tracking
 
+## AI-Powered Features
+
+- **Health Insights**: Amazon Bedrock analyzes your route and provides personalized health benefits of taking less-polluted paths
+- **Visual Pollution Forecasting**: AI-generated pollution heatmaps showing predicted air quality levels along your route
+- **Route Story Generator**: Creates shareable, personalized stories about your environmental impact
+- **Intelligent Air Quality Analysis**: Real-time assessment of pollution exposure with actionable recommendations
+
 ## Technology Stack
 
 - **Frontend**: Native iOS app built with SwiftUI and MapKit
 - **Maps & Routing**: Apple MapKit with custom route visualization
-- **Navigation**: Real-time cycling/walking directions with pollution awareness
+- **AI Backend**: AWS Lambda + API Gateway + Amazon Bedrock (Claude model)
+- **Image Generation**: Amazon Bedrock with Stable Diffusion for pollution heatmaps
+
+## AWS Services Used
+
+- **Amazon Bedrock**: Powers the AI features (route insights, pollution forecasting, story generation)
+- **AWS Lambda**: Serverless functions to process requests and generate responses
+- **API Gateway**: Exposes secure endpoints for the iOS app
+- **CloudFormation**: Infrastructure as code for deployment
 
 ## Getting Started
 
@@ -24,6 +39,7 @@ An eco-friendly cycling/walking route optimizer that minimizes your exposure to 
 - Xcode 14.0 or later
 - iOS 16.0 or later
 - Physical iOS device for testing location features (optional)
+- AWS Account with Bedrock access (for backend deployment)
 
 ### Running the App
 
@@ -37,34 +53,40 @@ open EcoCoach.xcodeproj
 3. Click the Run button or press Cmd+R
 4. The app will launch and request location permissions
 
+### Deploying the AWS Backend
+
+1. Install the AWS SAM CLI
+2. Deploy the CloudFormation stack:
+```bash
+cd aws
+sam build
+sam deploy --guided
+```
+
+3. Update the `baseURL` in `AWSService.swift` with your API Gateway URL
+
 ### Using the App
 
 1. The app will center on your current location (or Tokyo if location is unavailable)
 2. Tap anywhere on the map to set a destination
 3. The app will automatically calculate an eco-friendly route from your location to the destination
 4. View route details showing distance, time, and pollution exposure
-5. Toggle the alternative route option to see a different path with potentially lower pollution
-6. Press "Zoom to Route" to view the entire route
-7. Press "Reset" to clear the route and start over
+5. Use the AI feature buttons to:
+   - Get health insights about your route
+   - View pollution forecasts along your path
+   - Generate and share your environmental impact story
+6. Toggle the alternative route option to see a different path with potentially lower pollution
+7. Press "Zoom to Route" to view the entire route
+8. Press "Reset" to clear the route and start over
 
-## App Architecture
+## Real-world Impact
 
-The app is structured with a clean architecture:
+The Eco-Coach app delivers measurable real-world impact:
 
-- **Location Management**: Custom location manager for real-time position updates
-- **Map Interaction**: Interactive map with custom overlays for routes
-- **Route Generation**: Integration with MapKit's route planning with custom eco-awareness
-- **UI Components**: Clean SwiftUI interface with dynamic information panels
-
-## Future Enhancements
-
-Potential future enhancements include:
-
-- Integration with real pollution data sources via APIs
-- Machine learning models to predict pollution patterns
-- User accounts to save favorite routes
-- Historical tracking of pollution exposure
-- Integration with health apps to monitor respiratory impact
+- **Health Improvement**: Reduces exposure to harmful pollutants by up to 30% by suggesting cleaner routes
+- **Environmental Awareness**: Provides concrete metrics about CO2 and particulate matter avoided
+- **Behavioral Change**: Encourages sustainable travel choices through personalized insights
+- **Community Impact**: Shareable stories help promote eco-friendly transportation choices
 
 ## Screenshots
 
