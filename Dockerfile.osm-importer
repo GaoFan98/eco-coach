@@ -1,0 +1,27 @@
+FROM ubuntu:22.04
+
+# Set non-interactive mode for apt
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install dependencies
+RUN apt-get update && apt-get install -y \
+    osm2pgsql \
+    postgresql-client \
+    wget \
+    curl \
+    jq \
+    bash \
+    osmium-tool \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy SQL scripts
+COPY sql/ /app/sql/
+
+# Make scripts executable
+RUN chmod +x /app/sql/import_osm.sh
+
+# Default command waits for postgres and then runs the import script
+CMD ["/wait-for-it.sh", "postgres:5432", "--", "bash", "/app/sql/import_osm.sh", "tokyo"] 
