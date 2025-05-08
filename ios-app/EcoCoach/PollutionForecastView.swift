@@ -6,6 +6,22 @@ struct PollutionForecastView: View {
     let pollutionData: [PollutionPoint]
     @Binding var isPresented: Bool
     
+    // Filter pollution data to only show main route points
+    private var filteredPollutionData: [PollutionPoint] {
+        // Create a dictionary to store unique positions
+        var uniquePositions: [Double: PollutionPoint] = [:]
+        
+        // For each point, only keep the first one found for each position value
+        for point in pollutionData {
+            if uniquePositions[point.position] == nil {
+                uniquePositions[point.position] = point
+            }
+        }
+        
+        // Sort by position (0% to 100% along route)
+        return uniquePositions.values.sorted { $0.position < $1.position }
+    }
+    
     init(pollutionData: [PollutionPoint], isPresented: Binding<Bool>) {
         self._isPresented = isPresented
         self.pollutionData = pollutionData
@@ -67,7 +83,7 @@ struct PollutionForecastView: View {
                     .font(.subheadline)
                     .fontWeight(.semibold)
                 
-                ForEach(pollutionData, id: \.position) { point in
+                ForEach(filteredPollutionData) { point in
                     HStack {
                         Circle()
                             .fill(getPollutionColor(point.level))
@@ -136,19 +152,59 @@ struct MapViewWithOverlays: UIViewRepresentable {
         // Clear existing overlays first
         mapView.removeOverlays(mapView.overlays)
         
+        // Filter out points that are too close to each other to avoid clutter on the map
+        let filteredPoints = filterDuplicateCoordinates(pollutionData)
+        
         // Add pollution overlays
-        mapView.addPollutionOverlays(from: pollutionData)
-        print("🔴 Added \(pollutionData.count) pollution overlays to map")
+        mapView.addPollutionOverlays(from: filteredPoints)
+        print("🔴 Added \(filteredPoints.count) filtered pollution overlays to map")
         
         // Add route points as a polyline
-        if pollutionData.count > 1 {
-            var coordinates = pollutionData.map { 
+        if filteredPoints.count > 1 {
+            // Get the main points (unique positions)
+            let uniquePositions = Dictionary(grouping: filteredPoints, by: { $0.position })
+                .compactMap { $0.value.first }
+                .sorted { $0.position < $1.position }
+            
+            var coordinates = uniquePositions.map { 
                 CLLocationCoordinate2D(latitude: $0.lat, longitude: $0.lon) 
             }
-            let polyline = MKPolyline(coordinates: &coordinates, count: coordinates.count)
-            mapView.addOverlay(polyline)
-            print("📍 Added route polyline to map with \(coordinates.count) points")
+            
+            if coordinates.count > 1 {
+                let polyline = MKPolyline(coordinates: &coordinates, count: coordinates.count)
+                mapView.addOverlay(polyline)
+                print("📍 Added route polyline to map with \(coordinates.count) points")
+            }
         }
+    }
+    
+    // Filter out points that are too close to each other
+    private func filterDuplicateCoordinates(_ points: [PollutionPoint]) -> [PollutionPoint] {
+        // If we have very few points, don't filter
+        if points.count < 10 {
+            return points
+        }
+        
+        // For larger datasets, keep the main route points (one per position)
+        // and a subset of the offset points
+        var result: [PollutionPoint] = []
+        let uniquePositions = Dictionary(grouping: points, by: { $0.position })
+        
+        for (_, pointsWithSamePosition) in uniquePositions {
+            // Always keep the first point (main route point)
+            if let mainPoint = pointsWithSamePosition.first {
+                result.append(mainPoint)
+                
+                // For offset points, only keep a subset to reduce visual clutter
+                if pointsWithSamePosition.count > 1 {
+                    // Add up to 2 more offset points if available
+                    let additionalPoints = Array(pointsWithSamePosition.dropFirst().prefix(2))
+                    result.append(contentsOf: additionalPoints)
+                }
+            }
+        }
+        
+        return result
     }
     
     func makeCoordinator() -> Coordinator {

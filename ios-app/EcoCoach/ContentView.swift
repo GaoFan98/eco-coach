@@ -78,11 +78,43 @@ struct RouteInsightsResponse: Codable {
     let insights: [RouteInsight]
 }
 
-struct PollutionPoint: Codable {
+struct PollutionPoint: Codable, Identifiable {
+    let id: UUID
     let position: Double
     let level: String
     let lat: Double
     let lon: Double
+    
+    init(position: Double, level: String, lat: Double, lon: Double) {
+        self.id = UUID()
+        self.position = position
+        self.level = level
+        self.lat = lat
+        self.lon = lon
+    }
+    
+    // Required for Codable compatibility
+    enum CodingKeys: String, CodingKey {
+        case position, level, lat, lon
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        position = try container.decode(Double.self, forKey: .position)
+        level = try container.decode(String.self, forKey: .level)
+        lat = try container.decode(Double.self, forKey: .lat)
+        lon = try container.decode(Double.self, forKey: .lon)
+        id = UUID() // Generate a unique ID when decoding
+    }
+    
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(position, forKey: .position)
+        try container.encode(level, forKey: .level)
+        try container.encode(lat, forKey: .lat)
+        try container.encode(lon, forKey: .lon)
+        // id is not encoded as it's generated on the client
+    }
 }
 
 struct PollutionForecastResponse: Codable {
@@ -171,11 +203,6 @@ struct ContentView: View {
                 _ = MKMapView()
             }
             .overlay(
-                CustomMapViewRepresentable(region: $mapRegion, pollutionData: pollutionForecast?.pollutionData ?? [], routePoints: routePoints)
-                    .edgesIgnoringSafeArea(.all)
-                    .opacity(pollutionForecast != nil && showPollutionOverlayOnMap ? 1 : 0)
-            )
-            .overlay(
                 GeometryReader { geometry in
                     ZStack {
                         // Draw the primary route
@@ -208,6 +235,15 @@ struct ContentView: View {
                         }
                     }
                 }
+            )
+            .overlay(
+                PollutionMapViewWrapper(
+                    isVisible: $showPollutionOverlayOnMap,
+                    region: $mapRegion,
+                    pollutionData: pollutionForecast?.pollutionData ?? [],
+                    routePoints: routePoints
+                )
+                .allowsHitTesting(false)
             )
             
             // AI Feature buttons overlay (when route is active)
@@ -1327,72 +1363,124 @@ struct ShareSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
-// Replace MapViewRepresentable with this fixed version
-struct CustomMapViewRepresentable: UIViewRepresentable {
+// Replace CustomMapViewRepresentable with this fixed version
+struct PollutionMapViewWrapper: UIViewRepresentable {
+    @Binding var isVisible: Bool
     @Binding var region: MKCoordinateRegion
     let pollutionData: [PollutionPoint]
     let routePoints: [CLLocationCoordinate2D]
     
-    func makeUIView(context: Context) -> MKMapView {
-        let mapView = MKMapView()
-        mapView.delegate = context.coordinator
-        return mapView
-    }
-    
-    func updateUIView(_ mapView: MKMapView, context: Context) {
-        mapView.setRegion(region, animated: true)
+    func makeUIView(context: Context) -> UIView {
+        // Create a transparent container view
+        let containerView = UIView()
+        containerView.backgroundColor = .clear
         
-        // Clear existing overlays
-        mapView.removeOverlays(mapView.overlays)
-        
-        // Add pollution overlays if available
-        if !pollutionData.isEmpty {
-            // Add each overlay individually instead of using the extension
-            for point in pollutionData {
-                let level = point.level
-                let coordinate = CLLocationCoordinate2D(latitude: point.lat, longitude: point.lon)
-                
-                // Adjust radius based on pollution level
-                var radius: Double
-                switch level.lowercased() {
-                case "low":
-                    radius = 150.0 + (point.position * 100) // 150-250m radius
-                case "medium":
-                    radius = 180.0 + (point.position * 120) // 180-300m radius
-                case "high":
-                    radius = 200.0 + (point.position * 150) // 200-350m radius
-                default:
-                    radius = 150.0 // Default radius
-                }
-                
-                let overlay = CustomPollutionOverlay(
-                    center: coordinate,
-                    radius: radius,
-                    pollutionLevel: level
-                )
-                mapView.addOverlay(overlay)
-            }
-            print("✅ Added \(pollutionData.count) pollution points to main map")
+        // Create and add MapView only if visible
+        if isVisible {
+            let mapView = MKMapView()
+            mapView.delegate = context.coordinator
+            mapView.isUserInteractionEnabled = false // Prevent interactions with this overlay map
+            mapView.alpha = 0.7 // Make slightly transparent to see base map
+            
+            // Make the map background transparent
+            mapView.backgroundColor = .clear
+            
+            // Add the map view to the container
+            containerView.addSubview(mapView)
+            mapView.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                mapView.topAnchor.constraint(equalTo: containerView.topAnchor),
+                mapView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor),
+                mapView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
+                mapView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor)
+            ])
+            
+            // Store the map view for later updates
+            context.coordinator.mapView = mapView
         }
         
-        // Add route polyline
-        if routePoints.count > 1 {
-            var coordinates = routePoints
-            let polyline = MKPolyline(coordinates: &coordinates, count: coordinates.count)
-            mapView.addOverlay(polyline)
+        return containerView
+    }
+    
+    func updateUIView(_ uiView: UIView, context: Context) {
+        // Find the map view if it exists
+        let mapView = context.coordinator.mapView
+        
+        // Handle visibility changes
+        if isVisible && mapView == nil {
+            // Create and add MapView if it should be visible but doesn't exist
+            let newMapView = MKMapView()
+            newMapView.delegate = context.coordinator
+            newMapView.isUserInteractionEnabled = false
+            newMapView.alpha = 0.7
+            newMapView.backgroundColor = .clear
+            
+            uiView.addSubview(newMapView)
+            newMapView.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                newMapView.topAnchor.constraint(equalTo: uiView.topAnchor),
+                newMapView.bottomAnchor.constraint(equalTo: uiView.bottomAnchor),
+                newMapView.leadingAnchor.constraint(equalTo: uiView.leadingAnchor),
+                newMapView.trailingAnchor.constraint(equalTo: uiView.trailingAnchor)
+            ])
+            
+            context.coordinator.mapView = newMapView
+        } else if !isVisible && mapView != nil {
+            // Remove MapView if it should not be visible but exists
+            mapView?.removeFromSuperview()
+            context.coordinator.mapView = nil
+            return
+        } else if !isVisible {
+            // Nothing to update if not visible
+            return
+        }
+        
+        // Update the map view
+        if let mapView = context.coordinator.mapView {
+            // Set region to match main map
+            mapView.setRegion(region, animated: false)
+            
+            // Clear existing overlays
+            mapView.removeOverlays(mapView.overlays)
+            
+            // Add pollution overlays
+            if !pollutionData.isEmpty {
+                for point in pollutionData {
+                    let level = point.level
+                    let coordinate = CLLocationCoordinate2D(latitude: point.lat, longitude: point.lon)
+                    
+                    // Adjust radius based on pollution level
+                    var radius: Double
+                    switch level.lowercased() {
+                    case "low":
+                        radius = 150.0 + (point.position * 100) // 150-250m radius
+                    case "medium":
+                        radius = 180.0 + (point.position * 120) // 180-300m radius
+                    case "high":
+                        radius = 200.0 + (point.position * 150) // 200-350m radius
+                    default:
+                        radius = 150.0 // Default radius
+                    }
+                    
+                    let overlay = CustomPollutionOverlay(
+                        center: coordinate,
+                        radius: radius,
+                        pollutionLevel: level
+                    )
+                    mapView.addOverlay(overlay)
+                }
+                print("🔄 Updated pollution overlay with \(pollutionData.count) points")
+            }
         }
     }
     
     func makeCoordinator() -> Coordinator {
-        Coordinator(self)
+        Coordinator()
     }
     
     class Coordinator: NSObject, MKMapViewDelegate {
-        var parent: CustomMapViewRepresentable
-        
-        init(_ parent: CustomMapViewRepresentable) {
-            self.parent = parent
-        }
+        // Store the mapView to allow updating/removing in updateUIView
+        var mapView: MKMapView?
         
         func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
             if let pollutionOverlay = overlay as? CustomPollutionOverlay {
