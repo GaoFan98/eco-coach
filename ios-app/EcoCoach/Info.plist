@@ -46,5 +46,7 @@
         <key>NSAllowsArbitraryLoads</key>
         <true/>
     </dict>
+    <key>OpenAQAPIKey</key>
+    <string>a679a4125125f66648de5e37244d543118dc8562b2dcb6189e6eb8857951cd51</string>
 </dict>
 </plist> 
