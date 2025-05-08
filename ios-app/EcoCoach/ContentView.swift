@@ -159,9 +159,8 @@ struct ContentView: View {
     @State private var showInsights = false
     
     @State private var pollutionForecast: PollutionForecastResponse?
-    @State private var pollutionOverlayImage: UIImage?
     @State private var isLoadingForecast = false
-    @State private var showPollutionForecast = false
+    @State private var showPollutionOverlayOnMap = false
     
     @State private var routeStory: RouteStoryResponse?
     @State private var isLoadingStory = false
@@ -169,9 +168,6 @@ struct ContentView: View {
     
     // Cancellables for API requests
     @State private var cancellables = Set<AnyCancellable>()
-    
-    // Add new state variable for pollution overlay toggle near other @State variables
-    @State private var showPollutionOverlayOnMap = false
     
     var body: some View {
         ZStack {
@@ -274,7 +270,7 @@ struct ContentView: View {
                             }
                         }
                         
-                        // Pollution forecast button - modified to toggle overlay instead of showing modal
+                        // Pollution toggle button
                         Button(action: {
                             if pollutionForecast == nil {
                                 fetchPollutionForecast()
@@ -296,19 +292,21 @@ struct ContentView: View {
                                 }
                             }
                         }
-                        
-                        // Pollution legend button - show modal with explanation
-                        if pollutionForecast != nil {
-                            Button(action: {
-                                showPollutionForecast = true
-                            }) {
-                                Image(systemName: "info.circle.fill")
-                                    .font(.system(size: 20))
-                                    .foregroundColor(.white)
-                                    .padding(10)
-                                    .background(Circle().fill(Color.orange))
+                        .overlay(
+                            // Add a small badge to show pollution level
+                            Group {
+                                if let level = getPollutionSummaryLevel(), showPollutionOverlayOnMap {
+                                    Text(level)
+                                        .font(.system(size: 10))
+                                        .fontWeight(.bold)
+                                        .foregroundColor(.white)
+                                        .padding(4)
+                                        .background(getPollutionColor(level))
+                                        .clipShape(Circle())
+                                        .offset(x: 20, y: -15)
+                                }
                             }
-                        }
+                        )
                         
                         // Route story button
                         Button(action: {
@@ -466,24 +464,6 @@ struct ContentView: View {
                     .transition(AnyTransition.move(edge: .bottom))
             }
             
-            // Pollution forecast sheet
-            if showPollutionForecast, let pollutionData = pollutionForecast?.pollutionData {
-                Color.black.opacity(0.4)
-                    .edgesIgnoringSafeArea(.all)
-                    .onTapGesture {
-                        showPollutionForecast = false
-                    }
-                
-                PollutionForecastView(
-                    pollutionData: pollutionData,
-                    isPresented: $showPollutionForecast
-                )
-                .transition(AnyTransition.move(edge: .bottom))
-                .onAppear {
-                    print("🏁 PollutionForecastView appeared with \(pollutionData.count) data points")
-                }
-            }
-            
             // Route story sheet
             if showRouteStory, let storyData = routeStory {
                 Color.black.opacity(0.4)
@@ -566,11 +546,11 @@ struct ContentView: View {
         // Reset AWS AI feature data
         self.routeInsights = []
         self.pollutionForecast = nil
-        self.pollutionOverlayImage = nil
         self.routeStory = nil
         
         // Automatically calculate route when destination is set
         calculateRoute()
+        
     }
     
     // Fetch route insights from AWS Bedrock
@@ -651,20 +631,8 @@ struct ContentView: View {
                     self.pollutionForecast = response
                 }
                 
-                if let image = self.awsService.decodeBase64Image(response.imageBase64) {
-                    print("✅ Successfully decoded image from base64")
-                    self.pollutionOverlayImage = image
-                } else if !response.pollutionData.isEmpty {
-                    print("ℹ️ No image to decode, using map-based visualization with \(response.pollutionData.count) points")
-                    
-                    // Auto-enable overlay on main map when data is loaded
-                    self.showPollutionOverlayOnMap = true
-                } else {
-                    print("❌ Failed to decode image from base64 string and no pollution data points available")
-                }
-                
-                // Don't automatically show modal now, just toggle the overlay
-                // self.showPollutionForecast = false
+                // Auto-enable overlay on main map when data is loaded
+                self.showPollutionOverlayOnMap = true
             }
         )
         
@@ -1018,12 +986,10 @@ struct ContentView: View {
         // Reset AWS AI feature data
         routeInsights = []
         pollutionForecast = nil
-        pollutionOverlayImage = nil
         routeStory = nil
         
         // Reset UI states
         showInsights = false
-        showPollutionForecast = false
         showRouteStory = false
     }
     
@@ -1038,6 +1004,27 @@ struct ContentView: View {
         default:
             return .green
         }
+    }
+    
+    // Add helper function to determine the overall pollution level for badge
+    private func getPollutionSummaryLevel() -> String? {
+        guard let pollutionData = pollutionForecast?.pollutionData, !pollutionData.isEmpty else {
+            return nil
+        }
+        
+        // Count the occurrences of each level
+        var levelCounts: [String: Int] = [:]
+        
+        for point in pollutionData {
+            levelCounts[point.level, default: 0] += 1
+        }
+        
+        // Find the most common level
+        if let mostCommon = levelCounts.max(by: { $0.value < $1.value }) {
+            return mostCommon.key
+        }
+        
+        return nil
     }
 }
 
@@ -1169,83 +1156,6 @@ struct InsightRow: View {
                 .font(.body)
                 .foregroundColor(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-}
-
-// PollutionForecastView
-struct PollutionForecastView: View {
-    let pollutionData: [PollutionPoint]
-    @Binding var isPresented: Bool
-    
-    var body: some View {
-        VStack(spacing: 16) {
-            HStack {
-                Text("Pollution Forecast")
-                    .font(.headline)
-                    .foregroundColor(.primary)
-                
-                Spacer()
-                
-                Button(action: {
-                    isPresented = false
-                }) {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundColor(.gray)
-                }
-            }
-            
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Pollution Levels")
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                
-                ForEach(pollutionData, id: \.position) { point in
-                    HStack {
-                        Circle()
-                            .fill(getPollutionColor(point.level))
-                            .frame(width: 12, height: 12)
-                        
-                        Text("Point \(Int(point.position * 100))%")
-                            .font(.caption)
-                        
-                        Spacer()
-                        
-                        Text(point.level)
-                            .font(.caption)
-                            .foregroundColor(getPollutionColor(point.level))
-                            .fontWeight(.semibold)
-                    }
-                    .padding(.vertical, 4)
-                }
-            }
-            .padding()
-            .background(Color(UIColor.systemGray6))
-            .cornerRadius(12)
-            
-            Text("Best times to travel: Early morning or late evening")
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.top, 8)
-        }
-        .padding()
-        .background(Color.white)
-        .cornerRadius(20)
-        .shadow(radius: 10)
-        .padding()
-    }
-    
-    private func getPollutionColor(_ level: String) -> Color {
-        switch level.lowercased() {
-        case "low":
-            return .green
-        case "medium":
-            return .orange
-        case "high":
-            return .red
-        default:
-            return .gray
         }
     }
 }
