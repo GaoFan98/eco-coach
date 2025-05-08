@@ -163,7 +163,15 @@ struct ContentView: View {
                         )
                     }
                 }
+                
+                // Initialize MapKit if needed for pollution overlays
+                _ = MKMapView()
             }
+            .overlay(
+                CustomMapViewRepresentable(region: $mapRegion, pollutionData: pollutionForecast?.pollutionData ?? [], routePoints: routePoints)
+                    .edgesIgnoringSafeArea(.all)
+                    .opacity(pollutionForecast != nil && showPollutionForecast ? 1 : 0)
+            )
             .overlay(
                 GeometryReader { geometry in
                     ZStack {
@@ -414,11 +422,13 @@ struct ContentView: View {
                     }
                 
                 PollutionForecastView(
-                    pollutionOverlayImage: pollutionOverlayImage,
                     pollutionData: pollutionData,
                     isPresented: $showPollutionForecast
                 )
                 .transition(AnyTransition.move(edge: .bottom))
+                .onAppear {
+                    print("🏁 PollutionForecastView appeared with \(pollutionData.count) data points")
+                }
             }
             
             // Route story sheet
@@ -547,6 +557,8 @@ struct ContentView: View {
         guard let routeInfo = routeInfo, let start = routePoints.first, let end = routePoints.last else { return }
         
         isLoadingForecast = true
+        print("🔍 Starting pollution forecast API call with AWS credentials")
+        print("🔑 Using AWS Region: us-east-1")
         
         let cancellable = awsService.getPollutionForecast(
             routeData: routeInfo,
@@ -559,26 +571,59 @@ struct ContentView: View {
         .sink(
             receiveCompletion: { completion in
                 if case .failure(let error) = completion {
-                    print("Error fetching pollution forecast: \(error)")
+                    print("❌ Error fetching pollution forecast: \(error)")
+                    print("❌ Error details: \(String(describing: error))")
                     
-                    // Fallback to mock data if API call fails
+                    // Fallback to mock data if API call fails - create more points for a smoother visualization
+                    let pointCount = 7 // More points for better visualization
+                    var mockPoints: [PollutionPoint] = []
+                    
+                    for i in 0..<pointCount {
+                        let fraction = Double(i) / Double(pointCount - 1)
+                        let lat = start.latitude + (end.latitude - start.latitude) * fraction
+                        let lon = start.longitude + (end.longitude - start.longitude) * fraction
+                        
+                        // Vary the pollution levels along the route
+                        var level = "Low"
+                        if fraction < 0.25 {
+                            level = "Medium"
+                        } else if fraction > 0.7 {
+                            level = "High"
+                        }
+                        
+                        mockPoints.append(PollutionPoint(position: fraction, level: level, lat: lat, lon: lon))
+                    }
+                    
                     self.pollutionForecast = PollutionForecastResponse(
                         imageBase64: "",
-                        pollutionData: [
-                            PollutionPoint(position: 0, level: "Medium", lat: start.latitude, lon: start.longitude),
-                            PollutionPoint(position: 0.25, level: "Low", lat: start.latitude + (end.latitude - start.latitude) * 0.25, lon: start.longitude + (end.longitude - start.longitude) * 0.25),
-                            PollutionPoint(position: 0.5, level: "Low", lat: start.latitude + (end.latitude - start.latitude) * 0.5, lon: start.longitude + (end.longitude - start.longitude) * 0.5),
-                            PollutionPoint(position: 0.75, level: "Medium", lat: start.latitude + (end.latitude - start.latitude) * 0.75, lon: start.longitude + (end.longitude - start.longitude) * 0.75),
-                            PollutionPoint(position: 1, level: "High", lat: end.latitude, lon: end.longitude)
-                        ]
+                        pollutionData: mockPoints
                     )
                     self.showPollutionForecast = true
+                } else {
+                    print("✅ Successfully completed pollution forecast API call")
                 }
                 self.isLoadingForecast = false
             },
             receiveValue: { response in
+                print("📥 Received pollution forecast data")
+                print("🖼️ Image data present: \(response.imageBase64.isEmpty ? "No" : "Yes, \(response.imageBase64.count) characters")")
+                
+                // If we have pollution data points but no image, that's expected with our new implementation
+                if response.imageBase64.isEmpty && !response.pollutionData.isEmpty {
+                    print("✅ No image data but received \(response.pollutionData.count) pollution data points for map visualization")
+                }
+                
                 self.pollutionForecast = response
-                self.pollutionOverlayImage = self.awsService.decodeBase64Image(response.imageBase64)
+                
+                if let image = self.awsService.decodeBase64Image(response.imageBase64) {
+                    print("✅ Successfully decoded image from base64")
+                    self.pollutionOverlayImage = image
+                } else if !response.pollutionData.isEmpty {
+                    print("ℹ️ No image to decode, using map-based visualization with \(response.pollutionData.count) points")
+                } else {
+                    print("❌ Failed to decode image from base64 string and no pollution data points available")
+                }
+                
                 self.showPollutionForecast = true
             }
         )
@@ -1013,7 +1058,6 @@ struct InsightRow: View {
 
 // PollutionForecastView
 struct PollutionForecastView: View {
-    let pollutionOverlayImage: UIImage?
     let pollutionData: [PollutionPoint]
     @Binding var isPresented: Bool
     
@@ -1032,27 +1076,6 @@ struct PollutionForecastView: View {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundColor(.gray)
                 }
-            }
-            
-            if let image = pollutionOverlayImage {
-                Image(uiImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(height: 200)
-                    .cornerRadius(12)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(Color.gray.opacity(0.3), lineWidth: 1)
-                    )
-            } else {
-                Rectangle()
-                    .fill(Color.gray.opacity(0.2))
-                    .frame(height: 200)
-                    .cornerRadius(12)
-                    .overlay(
-                        Text("Pollution overlay not available")
-                            .foregroundColor(.gray)
-                    )
             }
             
             VStack(alignment: .leading, spacing: 8) {
@@ -1221,5 +1244,155 @@ struct ShareSheet: UIViewControllerRepresentable {
     }
     
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+
+// Replace MapViewRepresentable with this fixed version
+struct CustomMapViewRepresentable: UIViewRepresentable {
+    @Binding var region: MKCoordinateRegion
+    let pollutionData: [PollutionPoint]
+    let routePoints: [CLLocationCoordinate2D]
+    
+    func makeUIView(context: Context) -> MKMapView {
+        let mapView = MKMapView()
+        mapView.delegate = context.coordinator
+        return mapView
+    }
+    
+    func updateUIView(_ mapView: MKMapView, context: Context) {
+        mapView.setRegion(region, animated: true)
+        
+        // Clear existing overlays
+        mapView.removeOverlays(mapView.overlays)
+        
+        // Add pollution overlays if available
+        if !pollutionData.isEmpty {
+            // Add each overlay individually instead of using the extension
+            for point in pollutionData {
+                let level = point.level
+                let coordinate = CLLocationCoordinate2D(latitude: point.lat, longitude: point.lon)
+                let radius: CLLocationDistance = 200.0 + (point.position * 300) // 200-500m radius
+                
+                let overlay = CustomPollutionOverlay(
+                    center: coordinate,
+                    radius: radius,
+                    pollutionLevel: level
+                )
+                mapView.addOverlay(overlay)
+            }
+            print("✅ Added \(pollutionData.count) pollution points to main map")
+        }
+        
+        // Add route polyline
+        if routePoints.count > 1 {
+            var coordinates = routePoints
+            let polyline = MKPolyline(coordinates: &coordinates, count: coordinates.count)
+            mapView.addOverlay(polyline)
+        }
+    }
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+    
+    class Coordinator: NSObject, MKMapViewDelegate {
+        var parent: CustomMapViewRepresentable
+        
+        init(_ parent: CustomMapViewRepresentable) {
+            self.parent = parent
+        }
+        
+        func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
+            if let pollutionOverlay = overlay as? CustomPollutionOverlay {
+                return CustomPollutionOverlayRenderer(overlay: pollutionOverlay)
+            } else if let polyline = overlay as? MKPolyline {
+                let renderer = MKPolylineRenderer(overlay: polyline)
+                renderer.strokeColor = UIColor.systemBlue
+                renderer.lineWidth = 3
+                return renderer
+            }
+            
+            return MKOverlayRenderer(overlay: overlay)
+        }
+    }
+}
+
+// Duplicated overlay classes for ContentView
+class CustomPollutionOverlay: NSObject, MKOverlay {
+    let coordinate: CLLocationCoordinate2D
+    let boundingMapRect: MKMapRect
+    let radius: CLLocationDistance
+    let pollutionLevel: String
+    
+    init(center: CLLocationCoordinate2D, radius: CLLocationDistance, pollutionLevel: String) {
+        self.coordinate = center
+        self.radius = radius
+        self.pollutionLevel = pollutionLevel
+        
+        // Create bounding rect for the overlay
+        let regionRadius = radius * 1.5
+        let radiusInMapPoints = regionRadius / MKMapPointsPerMeterAtLatitude(center.latitude)
+        let topLeft = MKMapPoint(x: MKMapPoint(coordinate).x - radiusInMapPoints, 
+                                y: MKMapPoint(coordinate).y - radiusInMapPoints)
+        let size = MKMapSize(width: radiusInMapPoints * 2, height: radiusInMapPoints * 2)
+        self.boundingMapRect = MKMapRect(origin: topLeft, size: size)
+        
+        super.init()
+    }
+}
+
+class CustomPollutionOverlayRenderer: MKOverlayRenderer {
+    let pollutionOverlay: CustomPollutionOverlay
+    
+    init(overlay: CustomPollutionOverlay) {
+        self.pollutionOverlay = overlay
+        super.init(overlay: overlay)
+    }
+    
+    override func draw(_ mapRect: MKMapRect, zoomScale: MKZoomScale, in ctx: CGContext) {
+        // Get the circle's center point and radius in points
+        let mapPoint = MKMapPoint(pollutionOverlay.coordinate)
+        let circleCenter = point(for: mapPoint)
+        let circleRadius = pollutionOverlay.radius * Double(MKMapPointsPerMeterAtLatitude(pollutionOverlay.coordinate.latitude)) / zoomScale
+        
+        // Draw a circle with gradient
+        ctx.saveGState()
+        
+        // Define circle path
+        let circlePath = CGMutablePath()
+        circlePath.addArc(center: circleCenter, radius: CGFloat(circleRadius), 
+                         startAngle: 0, endAngle: CGFloat(2 * Double.pi), clockwise: false)
+        ctx.addPath(circlePath)
+        
+        // Set colors based on pollution level
+        var fillColor: CGColor
+        let alpha: CGFloat = 0.6
+        
+        switch pollutionOverlay.pollutionLevel.lowercased() {
+        case "low":
+            fillColor = UIColor.systemGreen.withAlphaComponent(alpha).cgColor
+        case "medium":
+            fillColor = UIColor.systemOrange.withAlphaComponent(alpha).cgColor
+        case "high":
+            fillColor = UIColor.systemRed.withAlphaComponent(alpha).cgColor
+        default:
+            fillColor = UIColor.systemBlue.withAlphaComponent(alpha).cgColor
+        }
+        
+        // Create gradient
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let colors = [fillColor, UIColor.clear.cgColor] as CFArray
+        let locations: [CGFloat] = [0.0, 1.0]
+        
+        if let gradient = CGGradient(colorsSpace: colorSpace, colors: colors, locations: locations) {
+            ctx.drawRadialGradient(gradient, 
+                                 startCenter: circleCenter, 
+                                 startRadius: 0, 
+                                 endCenter: circleCenter, 
+                                 endRadius: CGFloat(circleRadius), 
+                                 options: .drawsBeforeStartLocation)
+        }
+        
+        ctx.restoreGState()
+    }
 } 
  

@@ -93,12 +93,19 @@ class AWSServiceClass {
     
     init() {
         // Load credentials from Config
-        self.accessKey = Config.AWS.accessKey
-        self.secretKey = Config.AWS.secretKey
-        self.region = Config.AWS.region
+        self.accessKey = ConfigImporter.AwsConfig.accessKey
+        self.secretKey = ConfigImporter.AwsConfig.secretKey
+        self.region = ConfigImporter.AwsConfig.region
         
-        self.claudeModelId = Config.Bedrock.claudeModel
-        self.stableDiffusionModelId = Config.Bedrock.stableDiffusionModel
+        self.claudeModelId = ConfigImporter.BedrockConfig.claudeModel
+        self.stableDiffusionModelId = ConfigImporter.BedrockConfig.stableDiffusionModel
+        
+        print("🔐 AWSService initialized with:")
+        print("📍 Region: \(region)")
+        print("🔑 Access Key: \(accessKey.prefix(4))...\(accessKey.suffix(4))")
+        print("🔒 Secret Key: \(secretKey.prefix(4))...\(secretKey.suffix(4))")
+        print("🤖 Claude Model: \(claudeModelId)")
+        print("🎨 SD Model: \(stableDiffusionModelId)")
     }
     
     // MARK: - Direct Bedrock API Calls
@@ -153,6 +160,8 @@ class AWSServiceClass {
     }
     
     private func callStableDiffusionAPI(prompt: String) -> AnyPublisher<String, Error> {
+        print("🎨 Calling Stable Diffusion API with prompt: \(prompt)")
+        
         // Create Stable Diffusion request
         let request = StableDiffusionRequest(
             text_prompts: [
@@ -166,6 +175,7 @@ class AWSServiceClass {
         
         // Convert to JSON
         guard let requestData = try? JSONEncoder().encode(request) else {
+            print("❌ Failed to encode Stable Diffusion request")
             return Fail(error: NSError(domain: "AWSService", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to encode request"]))
                 .eraseToAnyPublisher()
         }
@@ -173,9 +183,11 @@ class AWSServiceClass {
         // Create Bedrock request
         let endpoint = "https://bedrock-runtime.\(region).amazonaws.com/model/\(stableDiffusionModelId)/invoke"
         guard let url = URL(string: endpoint) else {
+            print("❌ Invalid Bedrock endpoint URL: \(endpoint)")
             return Fail(error: URLError(.badURL)).eraseToAnyPublisher()
         }
         
+        print("🌐 Calling endpoint: \(endpoint)")
         var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = "POST"
         urlRequest.httpBody = requestData
@@ -183,16 +195,26 @@ class AWSServiceClass {
         
         // Sign request with AWS SigV4
         let date = ISO8601DateFormatter().string(from: Date())
+        print("📅 Request date: \(date)")
         signRequest(&urlRequest, date: date)
         
         // Make the request
         return URLSession.shared.dataTaskPublisher(for: urlRequest)
             .tryMap { data, response in
-                guard let httpResponse = response as? HTTPURLResponse, 
-                      (200...299).contains(httpResponse.statusCode) else {
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    print("❌ Not an HTTP response")
+                    throw NSError(domain: "BedrockAPI", code: 3, userInfo: [NSLocalizedDescriptionKey: "Not an HTTP response"])
+                }
+                
+                print("📶 Response status code: \(httpResponse.statusCode)")
+                
+                if !(200...299).contains(httpResponse.statusCode) {
                     let responseText = String(data: data, encoding: .utf8) ?? "Unknown error"
+                    print("❌ API Error: \(responseText)")
                     throw NSError(domain: "BedrockAPI", code: 2, userInfo: [NSLocalizedDescriptionKey: "API Error: \(responseText)"])
                 }
+                
+                print("✅ API call successful with data length: \(data.count)")
                 return data
             }
             .decode(type: StableDiffusionResponse.self, decoder: JSONDecoder())

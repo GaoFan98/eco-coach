@@ -2,9 +2,38 @@ import SwiftUI
 import MapKit
 
 struct PollutionForecastView: View {
-    let pollutionOverlayImage: UIImage?
+    @State private var mapRegion: MKCoordinateRegion
     let pollutionData: [PollutionPoint]
     @Binding var isPresented: Bool
+    
+    init(pollutionData: [PollutionPoint], isPresented: Binding<Bool>) {
+        self._isPresented = isPresented
+        self.pollutionData = pollutionData
+        
+        // Calculate the center and span for the region
+        if let firstPoint = pollutionData.first, let lastPoint = pollutionData.last {
+            let centerLat = (firstPoint.lat + lastPoint.lat) / 2
+            let centerLon = (firstPoint.lon + lastPoint.lon) / 2
+            
+            let latDelta = abs(firstPoint.lat - lastPoint.lat) * 1.5 // Add 50% padding
+            let lonDelta = abs(firstPoint.lon - lastPoint.lon) * 1.5
+            
+            // Ensure minimum span
+            let finalLatDelta = max(latDelta, 0.02)
+            let finalLonDelta = max(lonDelta, 0.02)
+            
+            self._mapRegion = State(initialValue: MKCoordinateRegion(
+                center: CLLocationCoordinate2D(latitude: centerLat, longitude: centerLon),
+                span: MKCoordinateSpan(latitudeDelta: finalLatDelta, longitudeDelta: finalLonDelta)
+            ))
+        } else {
+            // Default region if no points
+            self._mapRegion = State(initialValue: MKCoordinateRegion(
+                center: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194), // San Francisco
+                span: MKCoordinateSpan(latitudeDelta: 0.05, longitudeDelta: 0.05)
+            ))
+        }
+    }
     
     var body: some View {
         VStack(spacing: 16) {
@@ -23,26 +52,15 @@ struct PollutionForecastView: View {
                 }
             }
             
-            if let image = pollutionOverlayImage {
-                Image(uiImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(height: 200)
-                    .cornerRadius(12)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(Color.gray.opacity(0.3), lineWidth: 1)
-                    )
-            } else {
-                Rectangle()
-                    .fill(Color.gray.opacity(0.2))
-                    .frame(height: 200)
-                    .cornerRadius(12)
-                    .overlay(
-                        Text("Pollution overlay not available")
-                            .foregroundColor(.gray)
-                    )
-            }
+            // Map view with pollution overlays
+            MapViewWithOverlays(region: $mapRegion, pollutionData: pollutionData)
+                .frame(height: 300)
+                .cornerRadius(12)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                )
+                .padding(.horizontal, 4) // Give it some space
             
             VStack(alignment: .leading, spacing: 8) {
                 Text("Pollution Levels")
@@ -99,10 +117,70 @@ struct PollutionForecastView: View {
     }
 }
 
+// Map view with overlays
+struct MapViewWithOverlays: UIViewRepresentable {
+    @Binding var region: MKCoordinateRegion
+    let pollutionData: [PollutionPoint]
+    
+    func makeUIView(context: Context) -> MKMapView {
+        let mapView = MKMapView()
+        mapView.delegate = context.coordinator
+        mapView.mapType = .standard
+        print("🗺️ Creating map view with \(pollutionData.count) pollution points")
+        return mapView
+    }
+    
+    func updateUIView(_ mapView: MKMapView, context: Context) {
+        mapView.setRegion(region, animated: true)
+        
+        // Clear existing overlays first
+        mapView.removeOverlays(mapView.overlays)
+        
+        // Add pollution overlays
+        mapView.addPollutionOverlays(from: pollutionData)
+        print("🔴 Added \(pollutionData.count) pollution overlays to map")
+        
+        // Add route points as a polyline
+        if pollutionData.count > 1 {
+            var coordinates = pollutionData.map { 
+                CLLocationCoordinate2D(latitude: $0.lat, longitude: $0.lon) 
+            }
+            let polyline = MKPolyline(coordinates: &coordinates, count: coordinates.count)
+            mapView.addOverlay(polyline)
+            print("📍 Added route polyline to map with \(coordinates.count) points")
+        }
+    }
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+    
+    class Coordinator: NSObject, MKMapViewDelegate {
+        var parent: MapViewWithOverlays
+        
+        init(_ parent: MapViewWithOverlays) {
+            self.parent = parent
+        }
+        
+        func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
+            if let pollutionOverlay = overlay as? PollutionOverlay {
+                print("🎨 Rendering PollutionOverlay with level: \(pollutionOverlay.pollutionLevel)")
+                return PollutionOverlayRenderer(overlay: pollutionOverlay)
+            } else if let polyline = overlay as? MKPolyline {
+                let renderer = MKPolylineRenderer(overlay: polyline)
+                renderer.strokeColor = UIColor.systemBlue
+                renderer.lineWidth = 3
+                return renderer
+            }
+            
+            return MKOverlayRenderer(overlay: overlay)
+        }
+    }
+}
+
 struct PollutionForecastView_Previews: PreviewProvider {
     static var previews: some View {
         PollutionForecastView(
-            pollutionOverlayImage: nil,
             pollutionData: [
                 PollutionPoint(position: 0, level: "Medium", lat: 35.6895, lon: 139.6917),
                 PollutionPoint(position: 0.25, level: "Low", lat: 35.6890, lon: 139.6920),
