@@ -89,5 +89,19 @@ The Eco-Coach app delivers measurable real-world impact:
 - **Community Impact**: Shareable stories help promote eco-friendly transportation choices
 
 ## Screenshots
+App overview
 
-*Screenshots of the app in action would be included here* 
+![image](https://github.com/user-attachments/assets/0c0ca736-2738-43a5-b3ae-2111e754d9e5)
+
+![image](https://github.com/user-attachments/assets/9c3f36aa-c075-4c8f-8a9f-e356f8abcd0a)
+
+![image](https://github.com/user-attachments/assets/0248d5a7-1e07-4995-b0f5-5b43dd40c9f8)
+
+
+Features demo videos
+
+https://github.com/user-attachments/assets/cca82839-1609-4789-ba4f-4867e67b3a51
+
+https://github.com/user-attachments/assets/3da3d990-7f0c-42a2-b6b9-94c955ea4426
+
+
