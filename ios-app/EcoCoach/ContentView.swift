@@ -193,6 +193,14 @@ struct ContentView: View {
     // Cancellables for API requests
     @State private var cancellables = Set<AnyCancellable>()
     
+    // A variation for handling the opacity of the overlay
+    var pollutionOverlayOpacity: Double {
+        if pollutionForecast != nil && showPollutionOverlayOnMap {
+            return 0.65 // More transparent when showing pollution data
+        }
+        return 0.0
+    }
+    
     var body: some View {
         ZStack {
             // Map
@@ -222,11 +230,24 @@ struct ContentView: View {
                 // Initialize MapKit if needed for pollution overlays
                 _ = MKMapView()
             }
+            // Pollution overlay with reduced opacity
+            .overlay(
+                PollutionMapViewWrapper(
+                    isVisible: $showPollutionOverlayOnMap,
+                    region: $mapRegion,
+                    pollutionData: pollutionForecast?.pollutionData ?? [],
+                    routePoints: routePoints
+                )
+                .allowsHitTesting(false)
+                .opacity(pollutionOverlayOpacity)
+            )
+            // Route overlay with improved visibility
             .overlay(
                 GeometryReader { geometry in
                     ZStack {
-                        // Draw the primary route
+                        // Draw the primary route with improved visibility
                         if !routePoints.isEmpty {
+                            // Add white outline/shadow for contrast
                             Path { path in
                                 let startPoint = convertCoordinateToPoint(routePoints[0], in: geometry.size)
                                 path.move(to: startPoint)
@@ -236,11 +257,25 @@ struct ContentView: View {
                                     path.addLine(to: point)
                                 }
                             }
-                            .stroke(Color.green, lineWidth: 4)
+                            .stroke(Color.white, lineWidth: 7) // Thicker white outline
+                            .shadow(color: .black, radius: 2, x: 0, y: 0)
+                            
+                            // Main route line
+                            Path { path in
+                                let startPoint = convertCoordinateToPoint(routePoints[0], in: geometry.size)
+                                path.move(to: startPoint)
+                                
+                                for i in 1..<routePoints.count {
+                                    let point = convertCoordinateToPoint(routePoints[i], in: geometry.size)
+                                    path.addLine(to: point)
+                                }
+                            }
+                            .stroke(Color.green.opacity(0.9), lineWidth: 5) // Brighter green, thicker line
                         }
                         
-                        // Draw alternative route when toggled
+                        // Draw alternative route when toggled with improved visibility
                         if showAlternative && !alternativeRoutePoints.isEmpty {
+                            // Add white outline/shadow for contrast
                             Path { path in
                                 let startPoint = convertCoordinateToPoint(alternativeRoutePoints[0], in: geometry.size)
                                 path.move(to: startPoint)
@@ -250,20 +285,50 @@ struct ContentView: View {
                                     path.addLine(to: point)
                                 }
                             }
-                            .stroke(Color.blue, lineWidth: 4)
-                            .opacity(0.8)
+                            .stroke(Color.white, lineWidth: 7) // Thicker white outline
+                            .shadow(color: .black, radius: 2, x: 0, y: 0)
+                            
+                            // Alternative route line
+                            Path { path in
+                                let startPoint = convertCoordinateToPoint(alternativeRoutePoints[0], in: geometry.size)
+                                path.move(to: startPoint)
+                                
+                                for i in 1..<alternativeRoutePoints.count {
+                                    let point = convertCoordinateToPoint(alternativeRoutePoints[i], in: geometry.size)
+                                    path.addLine(to: point)
+                                }
+                            }
+                            .stroke(Color.blue.opacity(0.9), lineWidth: 5) // Brighter blue, thicker line
+                        }
+                        
+                        // Add markers for start and end points with high visibility
+                        if !routePoints.isEmpty {
+                            // Start point marker
+                            Circle()
+                                .fill(Color.white)
+                                .frame(width: 14, height: 14)
+                                .position(convertCoordinateToPoint(routePoints.first!, in: geometry.size))
+                                .overlay(
+                                    Circle()
+                                        .fill(Color.green)
+                                        .frame(width: 10, height: 10)
+                                        .position(convertCoordinateToPoint(routePoints.first!, in: geometry.size))
+                                )
+                            
+                            // End point marker
+                            Circle()
+                                .fill(Color.white)
+                                .frame(width: 14, height: 14)
+                                .position(convertCoordinateToPoint(routePoints.last!, in: geometry.size))
+                                .overlay(
+                                    Circle()
+                                        .fill(Color.red)
+                                        .frame(width: 10, height: 10)
+                                        .position(convertCoordinateToPoint(routePoints.last!, in: geometry.size))
+                                )
                         }
                     }
                 }
-            )
-            .overlay(
-                PollutionMapViewWrapper(
-                    isVisible: $showPollutionOverlayOnMap,
-                    region: $mapRegion,
-                    pollutionData: pollutionForecast?.pollutionData ?? [],
-                    routePoints: routePoints
-                )
-                .allowsHitTesting(false)
             )
             
             // AI Feature buttons overlay (when route is active)
@@ -1889,4 +1954,5 @@ class CustomPollutionOverlayRenderer: MKOverlayRenderer {
         return point.distance(to: closestPoint)
     }
 } 
+ 
  

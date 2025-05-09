@@ -14,7 +14,7 @@ An eco-friendly cycling/walking route optimizer that minimizes your exposure to 
 ## AI-Powered Features
 
 - **Health Insights**: Amazon Bedrock analyzes your route and provides personalized health benefits of taking less-polluted paths
-- **Visual Pollution Forecasting**: AI-generated pollution heatmaps showing predicted air quality levels along your route
+- **Visual Pollution Visualization**: MapKit-based colored overlays (green/orange/red) showing pollution levels along your route
 - **Route Story Generator**: Creates shareable, personalized stories about your environmental impact
 - **Intelligent Air Quality Analysis**: Real-time assessment of pollution exposure with actionable recommendations
 
@@ -23,11 +23,11 @@ An eco-friendly cycling/walking route optimizer that minimizes your exposure to 
 - **Frontend**: Native iOS app built with SwiftUI and MapKit
 - **Maps & Routing**: Apple MapKit with custom route visualization
 - **AI Backend**: AWS Lambda + API Gateway + Amazon Bedrock (Claude model)
-- **Image Generation**: Amazon Bedrock with Stable Diffusion for pollution heatmaps
+- **Pollution Visualization**: Custom MapKit overlays using real-time OpenAQ data
 
 ## AWS Services Used
 
-- **Amazon Bedrock**: Powers the AI features (route insights, pollution forecasting, story generation)
+- **Amazon Bedrock**: Powers the AI features (route insights, story generation)
 - **AWS Lambda**: Serverless functions to process requests and generate responses
 - **API Gateway**: Exposes secure endpoints for the iOS app
 - **CloudFormation**: Infrastructure as code for deployment
@@ -73,7 +73,7 @@ sam deploy --guided
 4. View route details showing distance, time, and pollution exposure
 5. Use the AI feature buttons to:
    - Get health insights about your route
-   - View pollution forecasts along your path
+   - Toggle pollution visualization overlay
    - Generate and share your environmental impact story
 6. Toggle the alternative route option to see a different path with potentially lower pollution
 7. Press "Zoom to Route" to view the entire route
