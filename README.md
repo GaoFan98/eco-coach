@@ -97,6 +97,7 @@ App overview
 
 ![image](https://github.com/user-attachments/assets/0248d5a7-1e07-4995-b0f5-5b43dd40c9f8)
 
+![image](https://github.com/user-attachments/assets/ee4a7b6e-1f1d-4837-b6a3-3d84738b30d5)
 
 Features demo videos
 
